@@ -1,9 +1,11 @@
-version: '3'
+version: '3.8'
 
 services:
+
   postgres-node-1:
+    image: bitnami/postgresql-repmgr:15.5.0
     container_name: postgres-node-1
-    image: bitnami/postgresql-repmgr:latest
+    restart: always
     environment:
       - POSTGRESQL_POSTGRES_PASSWORD=adminpassword
       - POSTGRESQL_USERNAME=myuser
@@ -13,18 +15,20 @@ services:
       - REPMGR_PRIMARY_HOST=postgres-node-1
       - REPMGR_NODE_NAME=postgres-node-1
       - REPMGR_NODE_NETWORK_NAME=postgres-node-1
-      - REPMGR_PRIMARY_PORT=5432
-      - REPMGR_PORT_NUMBER=5432
       - REPMGR_PARTNER_NODES=postgres-node-1,postgres-node-2
-      - BITNAMI_DEBUG=true
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-node-1-data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      retries: 5
 
   postgres-node-2:
+    image: bitnami/postgresql-repmgr:15.5.0
     container_name: postgres-node-2
-    image: bitnami/postgresql-repmgr:latest
+    restart: always
+    depends_on:
+      - postgres-node-1
     environment:
       - POSTGRESQL_POSTGRES_PASSWORD=adminpassword
       - POSTGRESQL_USERNAME=myuser
@@ -34,57 +38,18 @@ services:
       - REPMGR_PRIMARY_HOST=postgres-node-1
       - REPMGR_NODE_NAME=postgres-node-2
       - REPMGR_NODE_NETWORK_NAME=postgres-node-2
-      - REPMGR_PRIMARY_PORT=5432
-      - REPMGR_PORT_NUMBER=5432
       - REPMGR_PARTNER_NODES=postgres-node-1,postgres-node-2
-      - BITNAMI_DEBUG=true
-    depends_on:
-      - postgres-node-1
-    ports:
-      - "5433:5432"
     volumes:
       - postgres-node-2-data:/bitnami/postgresql
-
-  grafana-node-1:
-    container_name: grafana-node-1
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
-      - grafana-node-1-data:/var/lib/grafana
-    depends_on:
-      - haproxy
-
-  grafana-node-2:
-    container_name: grafana-node-2
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    ports:
-      - "3001:3000"
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
-      - grafana-node-2-data:/var/lib/grafana
-    depends_on:
-      - haproxy
-
-  nginx:
-    image: nginx:latest
-    ports:
-      - "8080:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - grafana-node-1
-      - grafana-node-2
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      retries: 5
 
   haproxy:
-    image: haproxy:latest
+    image: haproxy:2.9.7
+    container_name: haproxy
+    restart: always
     ports:
       - "5434:5432"
     volumes:
@@ -92,6 +57,59 @@ services:
     depends_on:
       - postgres-node-1
       - postgres-node-2
+
+  redis:
+    image: redis:7.2
+    container_name: redis
+    restart: always
+
+  grafana-node-1:
+    image: grafana/grafana:12.0.0
+    container_name: grafana-node-1
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - haproxy
+      - redis
+    volumes:
+      - grafana-node-1-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/login"]
+      interval: 30s
+      retries: 3
+
+  grafana-node-2:
+    image: grafana/grafana:12.0.0
+    container_name: grafana-node-2
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - haproxy
+      - redis
+    volumes:
+      - grafana-node-2-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/login"]
+      interval: 30s
+      retries: 3
+
+  nginx:
+    image: nginx:1.26.0
+    container_name: nginx
+    restart: always
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - grafana-node-1
+      - grafana-node-2
 
 volumes:
   postgres-node-1-data:
